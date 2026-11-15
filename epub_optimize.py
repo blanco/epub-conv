@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-epub_optimize.py - batch EPUB optimizer for small e-ink readers (480x800).
+epub_optimize.py - batch EPUB optimizer for Xteink X3 (528x792, default) / X4 (480x800) e-ink readers.
 
 A local port of the batch mode of https://epubdev.pages.dev ("EPUB Optimizer Pro"):
 
   * every PNG/GIF/WEBP/BMP/JPG/JPEG image is flattened onto white, scaled down
-    to fit 480x800 (never up), converted to grayscale and re-encoded as a
+    to fit the screen (never up), converted to grayscale and re-encoded as a
     baseline JPEG (mozjpeg's cjpeg is used when it is installed, Pillow otherwise)
   * image references in XHTML, CSS, NCX and the OPF are renamed to .jpg
   * SVG-wrapped images (common calibre cover pages) are replaced with <img>
@@ -44,7 +44,8 @@ except ImportError:  # pragma: no cover
 
 Image.MAX_IMAGE_PIXELS = None  # huge scans are fine, we only shrink them
 
-SCREEN_W, SCREEN_H = 480, 800          # target screen (site: Ot, St)
+DEVICES = {"x3": (528, 792), "x4": (480, 800)}   # Xteink screens; the site targets x4 (Ot, St)
+SCREEN_W, SCREEN_H = DEVICES["x4"]
 PXC_W, PXC_H = 464, 763                # CrossPoint image cache box (site: ri, ni)
 
 IMG_RE = re.compile(r"\.(png|gif|webp|bmp|jpg|jpeg)$", re.I)
@@ -317,8 +318,8 @@ def open_image(data: bytes) -> Image.Image:
     return im
 
 
-def to_screen_gray(data: bytes) -> Image.Image:
-    """Flatten on white, fit inside 480x800 (no upscaling), grayscale (BT.601 weights)."""
+def to_screen_gray(data: bytes, box: tuple[int, int] = (SCREEN_W, SCREEN_H)) -> Image.Image:
+    """Flatten on white, fit inside the screen box (no upscaling), grayscale (BT.601 weights)."""
     im = open_image(data)
     if im.mode in ("I;16", "I;16B", "I;16L", "I"):
         im = im.point(lambda v: v / 256).convert("L")
@@ -326,7 +327,7 @@ def to_screen_gray(data: bytes) -> Image.Image:
     flat = Image.new("RGB", rgba.size, (255, 255, 255))
     flat.paste(rgba, mask=rgba.getchannel("A"))
     w, h = flat.size
-    s = min(SCREEN_W / w, SCREEN_H / h, 1.0)
+    s = min(box[0] / w, box[1] / h, 1.0)
     nw, nh = max(1, js_round(w * s)), max(1, js_round(h * s))
     if (nw, nh) != (w, h):
         flat = flat.resize((nw, nh), Image.LANCZOS, reducing_gap=3.0)
@@ -666,7 +667,7 @@ def optimize_epub(src_path: Path, dst_path: Path, opts: dict) -> dict:
             if target != n and target in names:  # a .jpg of that name already exists: keep the extension
                 target = n
             try:
-                data = enc.encode(to_screen_gray(raw))
+                data = enc.encode(to_screen_gray(raw, opts.get("box", (SCREEN_W, SCREEN_H))))
                 out.append((target, data, zipfile.ZIP_STORED))
                 if target != n:
                     renames[n] = target
@@ -780,9 +781,12 @@ def human(n: float) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Optimize every EPUB in a folder for a 480x800 grayscale e-ink screen "
+        description="Optimize every EPUB in a folder for a small grayscale e-ink screen (Xteink X3/X4) "
                     "(local port of epubdev.pages.dev batch mode).")
     ap.add_argument("input", type=Path, help="folder of .epub files (or a single .epub)")
+    ap.add_argument("-d", "--device", choices=sorted(DEVICES), default="x3",
+                    help="reader to size images for: x3 = 528x792 (default), x4 = 480x800 (what the site uses)")
+    ap.add_argument("--size", metavar="WxH", help="custom screen size instead of --device, e.g. 600x800")
     ap.add_argument("-o", "--output", type=Path,
                     help="output folder (default: <input>/optimized)")
     ap.add_argument("-q", "--quality", type=int, default=85, help="JPEG quality 1-100 (default 85, as on the site)")
@@ -814,7 +818,14 @@ def main(argv=None) -> int:
         print("No .epub files found in %s" % inp)
         return 1
 
-    opts = {"quality": a.quality, "crosspoint": a.crosspoint_cache, "dither": a.dither,
+    if a.size:
+        m = re.fullmatch(r"(\d+)[xX](\d+)", a.size.strip())
+        if not m:
+            ap.error("--size must look like 528x792")
+        box = (int(m.group(1)), int(m.group(2)))
+    else:
+        box = DEVICES[a.device]
+    opts = {"box": box, "quality": a.quality, "crosspoint": a.crosspoint_cache, "dither": a.dither,
             "true_gray": a.true_grayscale, "mozjpeg": not a.no_mozjpeg}
     jobs, skipped = [], 0
     for b in books:
@@ -826,10 +837,13 @@ def main(argv=None) -> int:
         jobs.append((str(b), str(dst), opts))
 
     enc = JpegEncoder(a.quality, a.true_grayscale, not a.no_mozjpeg)
-    print("Encoder: %s | Q=%d | %s%s" % (enc.name, a.quality,
+    print("Encoder: %s | %dx%d | Q=%d | %s%s" % (enc.name, box[0], box[1], a.quality,
           "true grayscale" if a.true_grayscale else "gray (3-channel, like the site)",
           " | CrossPoint cache (%s dither)" % a.dither if a.crosspoint_cache else ""))
     print("Output:  %s" % out_dir)
+    if a.crosspoint_cache and box != DEVICES["x4"]:
+        print("Note: the .pxc image cache format comes from the site, which only targets the X4 (464x763 box).\n"
+              "      On other screens CrossPoint may ignore or rebuild it; test one book first.")
     if skipped:
         print("Skipping %d book(s) already in the output folder (use --overwrite to redo)" % skipped)
     if not jobs:
