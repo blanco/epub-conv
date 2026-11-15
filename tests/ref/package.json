@@ -1,0 +1,9 @@
+{
+  "name": "epub-conv-reference",
+  "private": true,
+  "description": "Runs functions copied from epubdev.pages.dev so the Python port can be compared byte for byte",
+  "dependencies": {
+    "@xmldom/xmldom": "^0.9.0",
+    "jszip": "^3.10.1"
+  }
+}

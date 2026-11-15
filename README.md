@@ -27,3 +27,5 @@ Ways it differs from the site:
 - Text in a non-UTF-8 file gets its encoding declaration corrected.
 - `--true-grayscale` writes 1-channel JPEGs, which are slightly smaller. The site actually writes 3-channel JPEGs of gray pixels, so that's the default here.
 - The site's single-file "split/rotate wide images" picker isn't included. The site's batch mode doesn't use it either.
+
+Tests: `tests/run_tests.sh` (see [tests/README.md](tests/README.md)).
