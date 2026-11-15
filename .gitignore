@@ -4,3 +4,5 @@ __pycache__/
 *.part
 optimized/
 .DS_Store
+tests/ref/node_modules/
+tests/ref/package-lock.json
